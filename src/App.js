@@ -20,24 +20,52 @@ export default function App() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) fetchProfile(session.user.id);
-      setLoading(false);
+      else setLoading(false);
     });
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) fetchProfile(session.user.id);
+      else {
+        setProfile(null);
+        setLoading(false);
+      }
     });
     return () => subscription.unsubscribe();
   }, []);
 
   async function fetchProfile(userId) {
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", userId)
-      .single();
-    setProfile(data);
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", userId)
+        .single();
+      if (error) {
+        await supabase.from("profiles").insert({
+          id: userId,
+          full_name:
+            (
+              await supabase.auth.getUser()
+            ).data.user?.user_metadata?.full_name || "Team Member",
+          email: (await supabase.auth.getUser()).data.user?.email,
+          role: "admin",
+        });
+        const { data: newProfile } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", userId)
+          .single();
+        setProfile(newProfile);
+      } else {
+        setProfile(data);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (loading)
