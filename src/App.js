@@ -35,6 +35,31 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    loadWorkspaceSettings();
+  }, []);
+
+  async function loadWorkspaceSettings() {
+    try {
+      const { data } = await supabase
+        .from("settings")
+        .select("*")
+        .eq("key", "workspace")
+        .single();
+      if (data) {
+        const settings = JSON.parse(data.value);
+        if (settings.primary_color) {
+          document.documentElement.style.setProperty(
+            "--primary",
+            settings.primary_color
+          );
+        }
+      }
+    } catch (e) {
+      console.log("No workspace settings yet");
+    }
+  }
+
   async function fetchProfile(userId) {
     try {
       const { data, error } = await supabase
@@ -43,13 +68,15 @@ export default function App() {
         .eq("id", userId)
         .single();
       if (error) {
+        const { data: userData } = await supabase.auth.getUser();
         await supabase.from("profiles").insert({
           id: userId,
           full_name:
-            (
-              await supabase.auth.getUser()
-            ).data.user?.user_metadata?.full_name || "Team Member",
-          email: (await supabase.auth.getUser()).data.user?.email,
+            userData.user?.user_metadata?.full_name ||
+            userData.user?.user_metadata?.name ||
+            userData.user?.email?.split("@")[0] ||
+            "Team Member",
+          email: userData.user?.email,
           role: "admin",
         });
         const { data: newProfile } = await supabase
