@@ -77,9 +77,7 @@ export default function Board({ profile }) {
         await Promise.all([
           supabase
             .from("tasks")
-            .select(
-              "*, assignee:profiles!tasks_assignee_id_fkey(id,full_name), blocked_by_task:tasks!tasks_blocked_by_fkey(id,title)"
-            )
+            .select("*, assignee:profiles!tasks_assignee_id_fkey(id,full_name)")
             .eq("archived", false)
             .order("created_at", { ascending: false }),
           supabase.from("profiles").select("id,full_name,role"),
