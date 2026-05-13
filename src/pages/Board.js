@@ -3,13 +3,6 @@ import { supabase } from "../lib/supabase";
 
 const STATUSES = ["To Do", "In Progress", "In Review", "Done"];
 const PRIORITIES = ["High", "Medium", "Low"];
-const CATEGORIES = [
-  "Engineering",
-  "Design",
-  "Finance",
-  "Marketing",
-  "Operations",
-];
 const RECURRENCES = ["None", "Daily", "Weekly", "Fortnightly", "Monthly"];
 const STATUS_COLORS = {
   "To Do": "#6B7280",
@@ -42,6 +35,7 @@ function getInitials(name = "") {
 export default function Board({ profile }) {
   const [tasks, setTasks] = useState([]);
   const [members, setMembers] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editTask, setEditTask] = useState(null);
   const [filterCat, setFilterCat] = useState("All");
@@ -56,7 +50,7 @@ export default function Board({ profile }) {
       assignee_id: "",
       due_date: "",
       priority: "Medium",
-      category: "Engineering",
+      category: "",
       status: "To Do",
       task_type: "One-time",
       recurrence: "None",
@@ -72,7 +66,7 @@ export default function Board({ profile }) {
 
   async function fetchAll() {
     setLoading(true);
-    const [{ data: t }, { data: m }] = await Promise.all([
+    const [{ data: t }, { data: m }, { data: c }] = await Promise.all([
       supabase
         .from("tasks")
         .select(
@@ -81,9 +75,11 @@ export default function Board({ profile }) {
         .eq("archived", false)
         .order("created_at", { ascending: false }),
       supabase.from("profiles").select("id,full_name,role"),
+      supabase.from("categories").select("*").order("created_at"),
     ]);
     setTasks(t || []);
     setMembers(m || []);
+    setCategories(c || []);
     setLoading(false);
   }
 
@@ -130,7 +126,7 @@ export default function Board({ profile }) {
       assignee_id: task.assignee_id || "",
       due_date: task.due_date || "",
       priority: task.priority || "Medium",
-      category: task.category || "Engineering",
+      category: task.category || "",
       status: task.status || "To Do",
       task_type: task.task_type || "One-time",
       recurrence: task.recurrence || "None",
@@ -143,7 +139,7 @@ export default function Board({ profile }) {
 
   function openNew(status = "To Do") {
     setEditTask(null);
-    setForm({ ...defaultForm(), status });
+    setForm({ ...defaultForm(), status, category: categories[0]?.name || "" });
     setShowModal(true);
   }
 
@@ -155,6 +151,16 @@ export default function Board({ profile }) {
   });
 
   const byStatus = (status) => filtered.filter((t) => t.status === status);
+
+  const getCatColor = (catName) => {
+    const cat = categories.find((c) => c.name === catName);
+    return cat ? cat.color : "#6B7280";
+  };
+
+  const getCatIcon = (catName) => {
+    const cat = categories.find((c) => c.name === catName);
+    return cat ? cat.icon : "📁";
+  };
 
   if (loading)
     return (
@@ -178,6 +184,7 @@ export default function Board({ profile }) {
         </button>
       </div>
 
+      {/* Filters */}
       <div className="filter-bar">
         <span
           style={{
@@ -188,13 +195,20 @@ export default function Board({ profile }) {
         >
           Category:
         </span>
-        {["All", ...CATEGORIES].map((c) => (
+        <button
+          className={`filter-pill${filterCat === "All" ? " active" : ""}`}
+          onClick={() => setFilterCat("All")}
+        >
+          All
+        </button>
+        {categories.map((c) => (
           <button
-            key={c}
-            className={`filter-pill${filterCat === c ? " active" : ""}`}
-            onClick={() => setFilterCat(c)}
+            key={c.id}
+            className={`filter-pill${filterCat === c.name ? " active" : ""}`}
+            onClick={() => setFilterCat(c.name)}
+            style={filterCat === c.name ? {} : {}}
           >
-            {c}
+            {c.icon} {c.name}
           </button>
         ))}
         <span
@@ -224,6 +238,7 @@ export default function Board({ profile }) {
         ))}
       </div>
 
+      {/* Kanban Board */}
       <div className="kanban-board">
         {STATUSES.map((status) => (
           <div key={status} className="kanban-col">
@@ -249,6 +264,8 @@ export default function Board({ profile }) {
                 onStatusChange={(s) => updateStatus(task.id, s)}
                 onArchive={() => archiveTask(task.id)}
                 statuses={STATUSES}
+                getCatColor={getCatColor}
+                getCatIcon={getCatIcon}
               />
             ))}
             <button className="add-task-btn" onClick={() => openNew(status)}>
@@ -258,6 +275,7 @@ export default function Board({ profile }) {
         ))}
       </div>
 
+      {/* Task Modal */}
       {showModal && (
         <div
           className="modal-overlay"
@@ -355,8 +373,11 @@ export default function Board({ profile }) {
                       setForm({ ...form, category: e.target.value })
                     }
                   >
-                    {CATEGORIES.map((c) => (
-                      <option key={c}>{c}</option>
+                    <option value="">No category</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.name}>
+                        {c.icon} {c.name}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -463,7 +484,15 @@ export default function Board({ profile }) {
   );
 }
 
-function TaskCard({ task, onEdit, onStatusChange, onArchive, statuses }) {
+function TaskCard({
+  task,
+  onEdit,
+  onStatusChange,
+  onArchive,
+  statuses,
+  getCatColor,
+  getCatIcon,
+}) {
   const [showMenu, setShowMenu] = useState(false);
   const name = task.assignee?.full_name || "";
   const isOverdue =
@@ -480,9 +509,18 @@ function TaskCard({ task, onEdit, onStatusChange, onArchive, statuses }) {
         <span className={`badge badge-${task.priority?.toLowerCase()}`}>
           {task.priority}
         </span>
-        <span className={`badge badge-${task.category?.toLowerCase()}`}>
-          {task.category}
-        </span>
+        {task.category && (
+          <span
+            className="badge"
+            style={{
+              background: getCatColor(task.category) + "22",
+              color: getCatColor(task.category),
+              border: `1px solid ${getCatColor(task.category)}44`,
+            }}
+          >
+            {getCatIcon(task.category)} {task.category}
+          </span>
+        )}
         {task.task_type === "Recurring" && (
           <span className="badge badge-recurring">⟳ {task.recurrence}</span>
         )}
