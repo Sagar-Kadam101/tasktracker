@@ -1,10 +1,15 @@
+// src/components/Sidebar.js — drop-in replacement
+// Adds "My Tasks" and "Team" to the navigation.
+
 import React from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
 const NAV = [
+  { to: "/dashboard", label: "My Tasks", icon: <HomeIcon /> },
   { to: "/board", label: "Board", icon: <KanbanIcon /> },
   { to: "/calendar", label: "Calendar", icon: <CalIcon /> },
+  { to: "/team", label: "Team", icon: <PeopleIcon /> },
   { to: "/reports", label: "Reports", icon: <ChartIcon /> },
   { to: "/archive", label: "Archive", icon: <ArchiveIcon /> },
 ];
@@ -90,6 +95,14 @@ export default function Sidebar({ profile }) {
   );
 }
 
+function HomeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M3 12l9-9 9 9" />
+      <path d="M5 10v10a1 1 0 001 1h4v-7h4v7h4a1 1 0 001-1V10" />
+    </svg>
+  );
+}
 function KanbanIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -105,6 +118,16 @@ function CalIcon() {
       <line x1="16" y1="2" x2="16" y2="6" />
       <line x1="8" y1="2" x2="8" y2="6" />
       <line x1="3" y1="10" x2="21" y2="10" />
+    </svg>
+  );
+}
+function PeopleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M3 21c0-3.3 2.7-6 6-6s6 2.7 6 6" />
+      <circle cx="17" cy="9" r="2.8" />
+      <path d="M14.5 21c0-2.5 2-4.5 4.5-4.5" />
     </svg>
   );
 }

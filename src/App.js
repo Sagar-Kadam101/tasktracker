@@ -1,3 +1,6 @@
+// src/App.js — drop-in replacement
+// Adds the /team route. Everything else unchanged.
+
 import React, { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { supabase } from "./lib/supabase";
@@ -8,6 +11,7 @@ import CalendarView from "./pages/CalendarView";
 import Reports from "./pages/Reports";
 import Archive from "./pages/Archive";
 import AdminPanel from "./pages/AdminPanel";
+import Team from "./pages/Team";
 import Sidebar from "./components/Sidebar";
 import "./App.css";
 
@@ -111,7 +115,7 @@ export default function App() {
         <Sidebar profile={profile} />
         <main className="main-content">
           <Routes>
-            <Route path="/" element={<Navigate to="/board" />} />
+            <Route path="/" element={<Navigate to="/dashboard" />} />
             <Route
               path="/dashboard"
               element={<Dashboard profile={profile} />}
@@ -121,6 +125,7 @@ export default function App() {
               path="/calendar"
               element={<CalendarView profile={profile} />}
             />
+            <Route path="/team" element={<Team profile={profile} />} />
             <Route path="/reports" element={<Reports profile={profile} />} />
             <Route path="/archive" element={<Archive profile={profile} />} />
             <Route path="/admin" element={<AdminPanel profile={profile} />} />
