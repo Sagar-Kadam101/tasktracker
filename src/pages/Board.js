@@ -67,6 +67,7 @@ export default function Board({ profile }) {
       blocked_by: "",
       tags: "",
       file_urls: "",
+      visibility: "public",
     };
   }
 
@@ -133,6 +134,7 @@ export default function Board({ profile }) {
         drive_link: form.drive_link || null,
         blocked_by: form.blocked_by || null,
         tags: form.tags || null,
+        visibility: form.visibility || "public",
         file_urls:
           allFileLinks.length > 0 ? JSON.stringify(allFileLinks) : null,
         archived: false,
@@ -250,6 +252,7 @@ export default function Board({ profile }) {
       blocked_by: task.blocked_by || "",
       tags: task.tags || "",
       file_urls: task.file_urls || "",
+      visibility: task.visibility || "public",
     });
     setShowDetailModal(false);
     setShowModal(true);
@@ -439,7 +442,17 @@ export default function Board({ profile }) {
           <div className="modal" style={{ maxWidth: 680 }}>
             <div className="modal-header">
               <div style={{ flex: 1 }}>
-                <h2 className="modal-title">{selectedTask.title}</h2>
+                <h2 className="modal-title">
+                  {selectedTask.visibility === "private" && (
+                    <span
+                      title="Private — only you, assignee and admins can see this"
+                      style={{ marginRight: 6 }}
+                    >
+                      🔒
+                    </span>
+                  )}
+                  {selectedTask.title}
+                </h2>
                 <div
                   style={{
                     display: "flex",
@@ -1340,6 +1353,98 @@ export default function Board({ profile }) {
                 />
               </div>
 
+              <div className="form-group">
+                <label className="form-label">Visibility</label>
+                <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                  <label
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "10px 12px",
+                      border: `2px solid ${
+                        form.visibility === "public"
+                          ? "var(--primary)"
+                          : "var(--border)"
+                      }`,
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      background:
+                        form.visibility === "public"
+                          ? "var(--primary-light, #EEECff)"
+                          : "transparent",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="visibility"
+                      value="public"
+                      checked={form.visibility === "public"}
+                      onChange={(e) =>
+                        setForm({ ...form, visibility: e.target.value })
+                      }
+                      style={{ accentColor: "var(--primary)" }}
+                    />
+                    <span style={{ fontSize: 13 }}>
+                      🌐 <strong>Public</strong>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-tertiary)",
+                          marginTop: 2,
+                        }}
+                      >
+                        Everyone in the team can see
+                      </div>
+                    </span>
+                  </label>
+                  <label
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "10px 12px",
+                      border: `2px solid ${
+                        form.visibility === "private"
+                          ? "var(--primary)"
+                          : "var(--border)"
+                      }`,
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      background:
+                        form.visibility === "private"
+                          ? "var(--primary-light, #EEECff)"
+                          : "transparent",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="visibility"
+                      value="private"
+                      checked={form.visibility === "private"}
+                      onChange={(e) =>
+                        setForm({ ...form, visibility: e.target.value })
+                      }
+                      style={{ accentColor: "var(--primary)" }}
+                    />
+                    <span style={{ fontSize: 13 }}>
+                      🔒 <strong>Private</strong>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-tertiary)",
+                          marginTop: 2,
+                        }}
+                      >
+                        Only you, assignee & admin
+                      </div>
+                    </span>
+                  </label>
+                </div>
+              </div>
+
               <div className="modal-footer">
                 <button
                   type="button"
@@ -1386,7 +1491,17 @@ function TaskCard({
 
   return (
     <div className="task-card" onClick={onOpen}>
-      <div className="task-card-title">{task.title}</div>
+      <div className="task-card-title">
+        {task.visibility === "private" && (
+          <span
+            title="Private — only you, assignee and admins can see this"
+            style={{ marginRight: 4 }}
+          >
+            🔒
+          </span>
+        )}
+        {task.title}
+      </div>
       <div
         style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 6 }}
       >
