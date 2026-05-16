@@ -46,7 +46,7 @@
   --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.1);
 
   --font: "Geist", system-ui, -apple-system, sans-serif;
-  --font-display: "Instrument Serif", Georgia, serif;
+  --font-display: "Geist", system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, monospace;
 }
 
