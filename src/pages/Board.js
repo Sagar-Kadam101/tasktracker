@@ -56,6 +56,29 @@ export default function Board({ profile }) {
   const [newSubtask, setNewSubtask] = useState("");
   const [fileLinks, setFileLinks] = useState([""]);
   const [activeTab, setActiveTab] = useState("details");
+  const [toast, setToast] = useState(null); // {msg, type} — for showing brief notifications
+
+  // Helper: pick a reviewer when none is set on a task entering review.
+  // Priority: 1) creator, but not if creator == assignee, 2) any admin, 3) null
+  function pickFallbackReviewer(task) {
+    if (!task) return null;
+    // Don't auto-assign creator as reviewer if they're also the assignee
+    if (task.created_by && task.created_by !== task.assignee_id) {
+      return { id: task.created_by, source: "creator" };
+    }
+    // Otherwise, find first admin
+    const admin = members.find((m) => m.role === "admin");
+    if (admin && admin.id !== task.assignee_id) {
+      return { id: admin.id, source: "admin" };
+    }
+    return null;
+  }
+
+  // Helper: show a toast message that auto-disappears after 4 seconds
+  function showToast(msg, type = "info") {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 4000);
+  }
 
   function defaultForm() {
     return {
@@ -152,11 +175,31 @@ export default function Board({ profile }) {
         created_by: profile?.id,
       };
       // Auto-track review start/end timestamps based on status
+      let autoAssignedToast = null;
       if (editTask) {
         const prevStatus = editTask.status;
         if (prevStatus !== "In Review" && form.status === "In Review") {
           payload.review_started_at = new Date().toISOString();
           payload.review_completed_at = null;
+          // Auto-assign reviewer if user didn't pick one
+          if (!payload.reviewer_id) {
+            const fallback = pickFallbackReviewer({
+              ...editTask,
+              assignee_id: payload.assignee_id,
+              created_by: editTask.created_by,
+            });
+            if (fallback) {
+              payload.reviewer_id = fallback.id;
+              const reviewerName =
+                members.find((m) => m.id === fallback.id)?.full_name ||
+                "someone";
+              autoAssignedToast = `👁 Auto-assigned ${reviewerName} as reviewer (${fallback.source}).`;
+            }
+          }
+          // Set default TAT if missing
+          if (!payload.review_tat_days) {
+            payload.review_tat_days = 2;
+          }
         }
         if (prevStatus === "In Review" && form.status !== "In Review") {
           payload.review_completed_at = new Date().toISOString();
@@ -165,6 +208,18 @@ export default function Board({ profile }) {
         // New task created directly in "In Review"
         if (form.status === "In Review") {
           payload.review_started_at = new Date().toISOString();
+          // Auto-assign creator (current user) as reviewer if no one picked
+          if (!payload.reviewer_id) {
+            // For new tasks, creator = current user. Don't self-review if they
+            // also assigned it to themselves; in that edge case skip auto-assign.
+            if (profile?.id && payload.assignee_id !== profile.id) {
+              payload.reviewer_id = profile.id;
+              autoAssignedToast = `👁 Auto-assigned you as reviewer (creator).`;
+            }
+          }
+          if (!payload.review_tat_days) {
+            payload.review_tat_days = 2;
+          }
         }
       }
       if (editTask) {
@@ -188,6 +243,7 @@ export default function Board({ profile }) {
       setForm(defaultForm());
       setFileLinks([""]);
       await fetchAll();
+      if (autoAssignedToast) showToast(autoAssignedToast);
     } catch (err) {
       console.error("Submit error:", err);
     } finally {
@@ -205,6 +261,31 @@ export default function Board({ profile }) {
     if (prevStatus !== "In Review" && newStatus === "In Review") {
       updates.review_started_at = new Date().toISOString();
       updates.review_completed_at = null;
+      // Auto-assign reviewer if none is set
+      if (currentTask && !currentTask.reviewer_id) {
+        const fallback = pickFallbackReviewer(currentTask);
+        if (fallback) {
+          updates.reviewer_id = fallback.id;
+          const reviewerName =
+            members.find((m) => m.id === fallback.id)?.full_name || "someone";
+          showToast(
+            `👁 Auto-assigned ${reviewerName} as reviewer (${
+              fallback.source
+            }). TAT: ${
+              currentTask.review_tat_days || 2
+            } days. Edit task to change.`
+          );
+        } else {
+          showToast(
+            "⚠ Moved to review but no reviewer could be auto-assigned. Edit task to assign one.",
+            "warn"
+          );
+        }
+      }
+      // Set default TAT if missing
+      if (currentTask && !currentTask.review_tat_days) {
+        updates.review_tat_days = 2;
+      }
     }
     // Leaving review → record completion time
     if (prevStatus === "In Review" && newStatus !== "In Review") {
@@ -418,6 +499,30 @@ export default function Board({ profile }) {
 
   return (
     <div>
+      {/* TOAST NOTIFICATION — appears bottom-right, auto-dismisses */}
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            zIndex: 9999,
+            background:
+              toast.type === "warn" ? "var(--danger)" : "var(--text-primary)",
+            color: "white",
+            padding: "12px 18px",
+            borderRadius: 10,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+            fontSize: 13,
+            fontWeight: 500,
+            maxWidth: 360,
+            lineHeight: 1.45,
+            animation: "fadeInUp 0.3s ease-out",
+          }}
+        >
+          {toast.msg}
+        </div>
+      )}
       <div className="page-header">
         <div>
           <h1 className="page-title">Task Board</h1>
