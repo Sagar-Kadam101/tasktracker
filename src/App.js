@@ -1,5 +1,5 @@
 // src/App.js — drop-in replacement
-// Adds the /team route. Everything else unchanged.
+// Fixes the role bug: first user = admin, everyone after = member.
 
 import React, { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
@@ -73,6 +73,16 @@ export default function App() {
         .single();
       if (error) {
         const { data: userData } = await supabase.auth.getUser();
+
+        // First user to ever sign up becomes admin. Everyone else is a member.
+        // Admin can later promote someone via the Admin Panel.
+        const { count: adminCount } = await supabase
+          .from("profiles")
+          .select("*", { count: "exact", head: true })
+          .eq("role", "admin");
+
+        const assignedRole = adminCount && adminCount > 0 ? "member" : "admin";
+
         await supabase.from("profiles").insert({
           id: userId,
           full_name:
@@ -81,7 +91,7 @@ export default function App() {
             userData.user?.email?.split("@")[0] ||
             "Team Member",
           email: userData.user?.email,
-          role: "admin",
+          role: assignedRole,
         });
         const { data: newProfile } = await supabase
           .from("profiles")
