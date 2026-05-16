@@ -1,12 +1,42 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TaskFlow — Team Task Tracker</title>
-</head>
-<body>
-  <noscript>You need JavaScript enabled to run this app.</noscript>
-  <div id="root"></div>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TaskFlow — Team Task Tracker</title>
+  </head>
+  <body>
+    <noscript>You need JavaScript enabled to run this app.</noscript>
+    <div id="root"></div>
+    <script>
+      (function () {
+        var saved = localStorage.getItem("tf_theme") || "spectrum";
+        document.body.setAttribute(
+          "data-theme",
+          saved === "terminal" ? "terminal" : ""
+        );
+        var btn = document.createElement("button");
+        btn.className = "theme-switcher";
+        btn.title = "Switch theme";
+        function render() {
+          var t =
+            document.body.getAttribute("data-theme") === "terminal"
+              ? "TERMINAL"
+              : "SPECTRUM";
+          btn.innerHTML = '<span class="theme-switcher-dot"></span>' + t;
+        }
+        btn.onclick = function () {
+          var next =
+            document.body.getAttribute("data-theme") === "terminal"
+              ? ""
+              : "terminal";
+          document.body.setAttribute("data-theme", next);
+          localStorage.setItem("tf_theme", next || "spectrum");
+          render();
+        };
+        document.body.appendChild(btn);
+        render();
+      })();
+    </script>
+  </body>
 </html>
