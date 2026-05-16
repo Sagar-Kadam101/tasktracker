@@ -43,6 +43,10 @@ export default function Board({ profile }) {
   const [filterCat, setFilterCat] = useState("All");
   const [filterAssignee, setFilterAssignee] = useState("All");
   const [filterTag, setFilterTag] = useState("All");
+  const [filterReviewer, setFilterReviewer] = useState("All");
+  const [filterVisibility, setFilterVisibility] = useState("All");
+  const [filterSearch, setFilterSearch] = useState("");
+  const [openDropdown, setOpenDropdown] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(defaultForm());
@@ -69,6 +73,8 @@ export default function Board({ profile }) {
       tags: "",
       file_urls: "",
       visibility: "public",
+      reviewer_id: "",
+      review_tat_days: 2,
     };
   }
 
@@ -136,11 +142,31 @@ export default function Board({ profile }) {
         blocked_by: form.blocked_by || null,
         tags: form.tags || null,
         visibility: form.visibility || "public",
+        reviewer_id: form.reviewer_id || null,
+        review_tat_days: form.review_tat_days
+          ? parseInt(form.review_tat_days, 10)
+          : null,
         file_urls:
           allFileLinks.length > 0 ? JSON.stringify(allFileLinks) : null,
         archived: false,
         created_by: profile?.id,
       };
+      // Auto-track review start/end timestamps based on status
+      if (editTask) {
+        const prevStatus = editTask.status;
+        if (prevStatus !== "In Review" && form.status === "In Review") {
+          payload.review_started_at = new Date().toISOString();
+          payload.review_completed_at = null;
+        }
+        if (prevStatus === "In Review" && form.status !== "In Review") {
+          payload.review_completed_at = new Date().toISOString();
+        }
+      } else {
+        // New task created directly in "In Review"
+        if (form.status === "In Review") {
+          payload.review_started_at = new Date().toISOString();
+        }
+      }
       if (editTask) {
         const { error } = await supabase
           .from("tasks")
@@ -170,8 +196,20 @@ export default function Board({ profile }) {
   }
 
   async function updateStatus(taskId, newStatus) {
+    // Find the existing task so we can detect status transitions
+    const currentTask = tasks.find((t) => t.id === taskId);
+    const prevStatus = currentTask?.status;
     const updates = { status: newStatus };
     if (newStatus === "Done") updates.completed_at = new Date().toISOString();
+    // Entering review → record start time, clear any prior completion
+    if (prevStatus !== "In Review" && newStatus === "In Review") {
+      updates.review_started_at = new Date().toISOString();
+      updates.review_completed_at = null;
+    }
+    // Leaving review → record completion time
+    if (prevStatus === "In Review" && newStatus !== "In Review") {
+      updates.review_completed_at = new Date().toISOString();
+    }
     await supabase.from("tasks").update(updates).eq("id", taskId);
     await fetchAll();
   }
@@ -254,6 +292,8 @@ export default function Board({ profile }) {
       tags: task.tags || "",
       file_urls: task.file_urls || "",
       visibility: task.visibility || "public",
+      reviewer_id: task.reviewer_id || "",
+      review_tat_days: task.review_tat_days || 2,
     });
     setShowDetailModal(false);
     setShowModal(true);
@@ -296,12 +336,43 @@ export default function Board({ profile }) {
     if (filterCat !== "All" && t.category !== filterCat) return false;
     if (filterAssignee !== "All" && t.assignee_id !== filterAssignee)
       return false;
+    if (filterReviewer !== "All" && t.reviewer_id !== filterReviewer)
+      return false;
+    if (
+      filterVisibility !== "All" &&
+      (t.visibility || "public") !== filterVisibility
+    )
+      return false;
     if (filterTag !== "All") {
       const tagList = parseTags(t.tags);
       if (!tagList.includes(filterTag)) return false;
     }
+    if (filterSearch.trim() !== "") {
+      const q = filterSearch.toLowerCase();
+      const inTitle = (t.title || "").toLowerCase().includes(q);
+      const inDesc = (t.description || "").toLowerCase().includes(q);
+      if (!inTitle && !inDesc) return false;
+    }
     return true;
   });
+
+  // How many filters are active right now
+  const activeFilterCount =
+    (filterCat !== "All" ? 1 : 0) +
+    (filterAssignee !== "All" ? 1 : 0) +
+    (filterReviewer !== "All" ? 1 : 0) +
+    (filterVisibility !== "All" ? 1 : 0) +
+    (filterTag !== "All" ? 1 : 0) +
+    (filterSearch.trim() !== "" ? 1 : 0);
+
+  function clearAllFilters() {
+    setFilterCat("All");
+    setFilterAssignee("All");
+    setFilterReviewer("All");
+    setFilterVisibility("All");
+    setFilterTag("All");
+    setFilterSearch("");
+  }
 
   const byStatus = (status) => filtered.filter((t) => t.status === status);
 
@@ -360,84 +431,274 @@ export default function Board({ profile }) {
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="filter-bar">
-        <span
-          style={{
-            fontSize: 12,
-            color: "var(--text-tertiary)",
-            fontWeight: 600,
-          }}
-        >
-          Category:
-        </span>
-        <button
-          className={`filter-pill${filterCat === "All" ? " active" : ""}`}
-          onClick={() => setFilterCat("All")}
-        >
-          All
-        </button>
-        {categories.map((c) => (
+      {/* Filters — dropdown-based design */}
+      <div
+        className="filter-bar"
+        onClick={(e) => {
+          // close any open dropdown if clicking on bare bar area
+          if (e.target === e.currentTarget) setOpenDropdown(null);
+        }}
+      >
+        {/* CATEGORY DROPDOWN */}
+        <div className="filter-dropdown">
           <button
-            key={c.id}
-            className={`filter-pill${filterCat === c.name ? " active" : ""}`}
-            onClick={() => setFilterCat(c.name)}
+            className={`filter-dropdown-btn${
+              filterCat !== "All" ? " has-value" : ""
+            }`}
+            onClick={() =>
+              setOpenDropdown(openDropdown === "cat" ? null : "cat")
+            }
           >
-            {c.icon} {c.name}
+            🗂 Category
+            {filterCat !== "All" && `: ${filterCat}`}
+            <span className="caret">▾</span>
           </button>
-        ))}
-        <span
-          style={{
-            fontSize: 12,
-            color: "var(--text-tertiary)",
-            fontWeight: 600,
-            marginLeft: 8,
-          }}
-        >
-          Assignee:
-        </span>
-        <button
-          className={`filter-pill${filterAssignee === "All" ? " active" : ""}`}
-          onClick={() => setFilterAssignee("All")}
-        >
-          All
-        </button>
-        {members.map((m) => (
-          <button
-            key={m.id}
-            className={`filter-pill${filterAssignee === m.id ? " active" : ""}`}
-            onClick={() => setFilterAssignee(m.id)}
-          >
-            {m.full_name?.split(" ")[0]}
-          </button>
-        ))}
-        {allTags.length > 0 && (
-          <>
-            <span
-              style={{
-                fontSize: 12,
-                color: "var(--text-tertiary)",
-                fontWeight: 600,
-                marginLeft: 8,
-              }}
-            >
-              Tag:
-            </span>
-            <button
-              className={`filter-pill${filterTag === "All" ? " active" : ""}`}
-              onClick={() => setFilterTag("All")}
-            >
-              All
-            </button>
-            {allTags.map((tag) => (
+          {openDropdown === "cat" && (
+            <div className="filter-dropdown-menu">
               <button
-                key={tag}
-                className={`filter-pill${filterTag === tag ? " active" : ""}`}
-                onClick={() => setFilterTag(tag)}
+                className={`filter-dropdown-item${
+                  filterCat === "All" ? " selected" : ""
+                }`}
+                onClick={() => {
+                  setFilterCat("All");
+                  setOpenDropdown(null);
+                }}
               >
-                #{tag}
+                All categories
+                {filterCat === "All" && <span className="check">✓</span>}
               </button>
-            ))}
+              {categories.map((c) => (
+                <button
+                  key={c.id}
+                  className={`filter-dropdown-item${
+                    filterCat === c.name ? " selected" : ""
+                  }`}
+                  onClick={() => {
+                    setFilterCat(c.name);
+                    setOpenDropdown(null);
+                  }}
+                >
+                  <span>{c.icon}</span> {c.name}
+                  {filterCat === c.name && <span className="check">✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ASSIGNEE DROPDOWN */}
+        <div className="filter-dropdown">
+          <button
+            className={`filter-dropdown-btn${
+              filterAssignee !== "All" ? " has-value" : ""
+            }`}
+            onClick={() =>
+              setOpenDropdown(openDropdown === "assignee" ? null : "assignee")
+            }
+          >
+            👤 Assignee
+            {filterAssignee !== "All" &&
+              `: ${
+                members
+                  .find((m) => m.id === filterAssignee)
+                  ?.full_name?.split(" ")[0] || "?"
+              }`}
+            <span className="caret">▾</span>
+          </button>
+          {openDropdown === "assignee" && (
+            <div className="filter-dropdown-menu">
+              <button
+                className={`filter-dropdown-item${
+                  filterAssignee === "All" ? " selected" : ""
+                }`}
+                onClick={() => {
+                  setFilterAssignee("All");
+                  setOpenDropdown(null);
+                }}
+              >
+                All assignees
+                {filterAssignee === "All" && <span className="check">✓</span>}
+              </button>
+              {members.map((m) => (
+                <button
+                  key={m.id}
+                  className={`filter-dropdown-item${
+                    filterAssignee === m.id ? " selected" : ""
+                  }`}
+                  onClick={() => {
+                    setFilterAssignee(m.id);
+                    setOpenDropdown(null);
+                  }}
+                >
+                  {m.full_name}
+                  {filterAssignee === m.id && <span className="check">✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* REVIEWER DROPDOWN */}
+        <div className="filter-dropdown">
+          <button
+            className={`filter-dropdown-btn${
+              filterReviewer !== "All" ? " has-value" : ""
+            }`}
+            onClick={() =>
+              setOpenDropdown(openDropdown === "reviewer" ? null : "reviewer")
+            }
+          >
+            👁 Reviewer
+            {filterReviewer !== "All" &&
+              `: ${
+                members
+                  .find((m) => m.id === filterReviewer)
+                  ?.full_name?.split(" ")[0] || "?"
+              }`}
+            <span className="caret">▾</span>
+          </button>
+          {openDropdown === "reviewer" && (
+            <div className="filter-dropdown-menu">
+              <button
+                className={`filter-dropdown-item${
+                  filterReviewer === "All" ? " selected" : ""
+                }`}
+                onClick={() => {
+                  setFilterReviewer("All");
+                  setOpenDropdown(null);
+                }}
+              >
+                All reviewers
+                {filterReviewer === "All" && <span className="check">✓</span>}
+              </button>
+              {members.map((m) => (
+                <button
+                  key={m.id}
+                  className={`filter-dropdown-item${
+                    filterReviewer === m.id ? " selected" : ""
+                  }`}
+                  onClick={() => {
+                    setFilterReviewer(m.id);
+                    setOpenDropdown(null);
+                  }}
+                >
+                  {m.full_name}
+                  {filterReviewer === m.id && <span className="check">✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* TAG DROPDOWN — only when tags exist */}
+        {allTags.length > 0 && (
+          <div className="filter-dropdown">
+            <button
+              className={`filter-dropdown-btn${
+                filterTag !== "All" ? " has-value" : ""
+              }`}
+              onClick={() =>
+                setOpenDropdown(openDropdown === "tag" ? null : "tag")
+              }
+            >
+              🏷 Tag
+              {filterTag !== "All" && `: #${filterTag}`}
+              <span className="caret">▾</span>
+            </button>
+            {openDropdown === "tag" && (
+              <div className="filter-dropdown-menu">
+                <button
+                  className={`filter-dropdown-item${
+                    filterTag === "All" ? " selected" : ""
+                  }`}
+                  onClick={() => {
+                    setFilterTag("All");
+                    setOpenDropdown(null);
+                  }}
+                >
+                  All tags
+                  {filterTag === "All" && <span className="check">✓</span>}
+                </button>
+                {allTags.map((tag) => (
+                  <button
+                    key={tag}
+                    className={`filter-dropdown-item${
+                      filterTag === tag ? " selected" : ""
+                    }`}
+                    onClick={() => {
+                      setFilterTag(tag);
+                      setOpenDropdown(null);
+                    }}
+                  >
+                    #{tag}
+                    {filterTag === tag && <span className="check">✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* VISIBILITY DROPDOWN */}
+        <div className="filter-dropdown">
+          <button
+            className={`filter-dropdown-btn${
+              filterVisibility !== "All" ? " has-value" : ""
+            }`}
+            onClick={() =>
+              setOpenDropdown(
+                openDropdown === "visibility" ? null : "visibility"
+              )
+            }
+          >
+            🔒 Visibility
+            {filterVisibility !== "All" && `: ${filterVisibility}`}
+            <span className="caret">▾</span>
+          </button>
+          {openDropdown === "visibility" && (
+            <div className="filter-dropdown-menu">
+              {["All", "public", "private"].map((v) => (
+                <button
+                  key={v}
+                  className={`filter-dropdown-item${
+                    filterVisibility === v ? " selected" : ""
+                  }`}
+                  onClick={() => {
+                    setFilterVisibility(v);
+                    setOpenDropdown(null);
+                  }}
+                >
+                  {v === "All"
+                    ? "All visibility"
+                    : v === "public"
+                    ? "🌐 Public"
+                    : "🔒 Private"}
+                  {filterVisibility === v && <span className="check">✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* SEARCH */}
+        <input
+          type="text"
+          className="filter-search-input"
+          placeholder="🔍 Search tasks..."
+          value={filterSearch}
+          onChange={(e) => setFilterSearch(e.target.value)}
+        />
+
+        {/* ACTIVE COUNT + CLEAR */}
+        {activeFilterCount > 0 && (
+          <>
+            <span className="filter-active-count">
+              {activeFilterCount} filter{activeFilterCount > 1 ? "s" : ""}{" "}
+              active
+            </span>
+            <button className="filter-clear-link" onClick={clearAllFilters}>
+              ✕ Clear all
+            </button>
           </>
         )}
       </div>
@@ -464,6 +725,7 @@ export default function Board({ profile }) {
               <TaskCard
                 key={task.id}
                 task={task}
+                members={members}
                 onOpen={() => openDetail(task)}
                 onStatusChange={(s) => updateStatus(task.id, s)}
                 onArchive={() => archiveTask(task.id)}
@@ -762,6 +1024,125 @@ export default function Board({ profile }) {
                     </div>
                   </div>
                 </div>
+                {/* REVIEWER INFO BLOCK */}
+                {selectedTask.reviewer_id && (
+                  <div
+                    style={{
+                      background: "var(--bg-soft)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 10,
+                      padding: 12,
+                      marginBottom: 14,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: "var(--text-tertiary)",
+                        textTransform: "uppercase",
+                        marginBottom: 8,
+                      }}
+                    >
+                      👁 Review
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        fontSize: 13,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        {(() => {
+                          const rev = members.find(
+                            (m) => m.id === selectedTask.reviewer_id
+                          );
+                          return rev ? (
+                            <>
+                              <div
+                                className="avatar"
+                                style={{
+                                  background: getColor(rev.full_name),
+                                  width: 24,
+                                  height: 24,
+                                  fontSize: 10,
+                                }}
+                              >
+                                {getInitials(rev.full_name)}
+                              </div>
+                              <span>{rev.full_name}</span>
+                            </>
+                          ) : (
+                            <span>Unknown reviewer</span>
+                          );
+                        })()}
+                      </div>
+                      {selectedTask.review_tat_days && (
+                        <span
+                          style={{
+                            fontSize: 12,
+                            color: "var(--text-secondary)",
+                          }}
+                        >
+                          TAT: {selectedTask.review_tat_days} day
+                          {selectedTask.review_tat_days > 1 ? "s" : ""}
+                        </span>
+                      )}
+                      {selectedTask.status === "In Review" &&
+                        selectedTask.review_started_at &&
+                        (() => {
+                          const dueMs =
+                            new Date(selectedTask.review_started_at).getTime() +
+                            (selectedTask.review_tat_days || 2) * 86400000;
+                          const remainingMs = dueMs - Date.now();
+                          const days = Math.ceil(
+                            Math.abs(remainingMs) / 86400000
+                          );
+                          const overdue = remainingMs < 0;
+                          return (
+                            <span
+                              style={{
+                                fontSize: 12,
+                                fontWeight: 600,
+                                color: overdue
+                                  ? "var(--danger)"
+                                  : "var(--success)",
+                              }}
+                            >
+                              {overdue
+                                ? `⚠ Review overdue by ${days}d`
+                                : `${days}d remaining`}
+                            </span>
+                          );
+                        })()}
+                      {selectedTask.review_completed_at && (
+                        <span
+                          style={{
+                            fontSize: 12,
+                            color: "var(--success)",
+                          }}
+                        >
+                          ✓ Review completed{" "}
+                          {new Date(
+                            selectedTask.review_completed_at
+                          ).toLocaleDateString("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                          })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {selectedTask.description && (
                   <div style={{ marginBottom: 14 }}>
                     <div
@@ -1580,6 +1961,89 @@ export default function Board({ profile }) {
                 </div>
               </div>
 
+              {/* REVIEWER + REVIEW TAT */}
+              <div
+                className="form-group"
+                style={{
+                  background: "var(--bg-soft)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 10,
+                  padding: 12,
+                }}
+              >
+                <label
+                  className="form-label"
+                  style={{ marginBottom: 8, display: "block" }}
+                >
+                  👁 Review
+                </label>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <div style={{ flex: 2 }}>
+                    <label
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-tertiary)",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Reviewer (optional)
+                    </label>
+                    <select
+                      className="form-input"
+                      value={form.reviewer_id}
+                      onChange={(e) =>
+                        setForm({ ...form, reviewer_id: e.target.value })
+                      }
+                    >
+                      <option value="">— No reviewer —</option>
+                      {members.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.full_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-tertiary)",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Review TAT (days)
+                    </label>
+                    <input
+                      className="form-input"
+                      type="number"
+                      min="1"
+                      max="30"
+                      value={form.review_tat_days || ""}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          review_tat_days: e.target.value,
+                        })
+                      }
+                      placeholder="2"
+                      disabled={!form.reviewer_id}
+                    />
+                  </div>
+                </div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--text-tertiary)",
+                    marginTop: 6,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  When status moves to "In Review", the reviewer must complete
+                  the review within the TAT (days). Overdue reviews appear in
+                  the Reports page.
+                </div>
+              </div>
+
               <div className="modal-footer">
                 <button
                   type="button"
@@ -1610,6 +2074,7 @@ export default function Board({ profile }) {
 
 function TaskCard({
   task,
+  members,
   onOpen,
   onStatusChange,
   onArchive,
@@ -1623,6 +2088,21 @@ function TaskCard({
     task.due_date &&
     new Date(task.due_date) < new Date() &&
     task.status !== "Done";
+
+  // Reviewer info — derive from members list because reviewer isn't a joined relation
+  const reviewer =
+    task.reviewer_id && members
+      ? members.find((m) => m.id === task.reviewer_id)
+      : null;
+
+  // Review TAT overdue: only while task is In Review and review has started
+  const isReviewOverdue =
+    task.status === "In Review" &&
+    task.review_started_at &&
+    task.review_tat_days &&
+    new Date(task.review_started_at).getTime() +
+      task.review_tat_days * 24 * 60 * 60 * 1000 <
+      new Date().getTime();
 
   return (
     <div className="task-card" onClick={onOpen}>
@@ -1694,11 +2174,17 @@ function TaskCard({
           ⛔ Blocked by: {task.blocked_by_task.title}
         </div>
       )}
+      {isReviewOverdue && (
+        <div style={{ marginBottom: 6 }}>
+          <span className="review-overdue-badge">⚠ Review overdue</span>
+        </div>
+      )}
       <div className="task-card-footer">
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {name && (
             <div
               className="avatar"
+              title={`Assignee: ${name}`}
               style={{
                 background: getColor(name),
                 width: 22,
@@ -1707,6 +2193,23 @@ function TaskCard({
               }}
             >
               {getInitials(name)}
+            </div>
+          )}
+          {reviewer && (
+            <div
+              className="avatar"
+              title={`Reviewer: ${reviewer.full_name}`}
+              style={{
+                background: getColor(reviewer.full_name),
+                width: 20,
+                height: 20,
+                fontSize: 9,
+                border: "2px solid var(--bg-card)",
+                marginLeft: -6,
+                position: "relative",
+              }}
+            >
+              👁
             </div>
           )}
           {task.due_date && (

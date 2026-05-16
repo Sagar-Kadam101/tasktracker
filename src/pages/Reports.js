@@ -85,6 +85,29 @@ export default function Reports() {
     }))
     .sort((a, b) => b.daysLate - a.daysLate);
 
+  // Tasks currently In Review where review TAT has been exceeded
+  const overdueReviews = active
+    .filter(
+      (t) =>
+        t.status === "In Review" &&
+        t.review_started_at &&
+        t.review_tat_days &&
+        new Date(t.review_started_at).getTime() + t.review_tat_days * 86400000 <
+          now.getTime()
+    )
+    .map((t) => {
+      const dueMs =
+        new Date(t.review_started_at).getTime() + t.review_tat_days * 86400000;
+      const daysLate = Math.floor((now.getTime() - dueMs) / 86400000);
+      const reviewer = members.find((m) => m.id === t.reviewer_id);
+      return {
+        ...t,
+        daysLate,
+        reviewerName: reviewer?.full_name || "Unknown",
+      };
+    })
+    .sort((a, b) => b.daysLate - a.daysLate);
+
   function exportCSV() {
     const rows = [
       ["Task", "Category", "Assignee", "Due Date", "Status", "Days Late"],
@@ -137,6 +160,15 @@ export default function Reports() {
             {overdue.length}
           </div>
           <div className="stat-label">Overdue</div>
+        </div>
+        <div className="stat-card">
+          <div
+            className="stat-value"
+            style={{ color: overdueReviews.length > 0 ? "#DC2626" : "inherit" }}
+          >
+            {overdueReviews.length}
+          </div>
+          <div className="stat-label">Overdue reviews</div>
         </div>
         <div className="stat-card">
           <div className="stat-value">{members.length}</div>
@@ -335,6 +367,67 @@ export default function Reports() {
                         ? "Moderate"
                         : "Minor"}
                     </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* OVERDUE REVIEWS SECTION */}
+      <div className="card" style={{ marginTop: 14 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 14,
+          }}
+        >
+          <div className="card-title" style={{ marginBottom: 0 }}>
+            👁 Overdue reviews
+          </div>
+          <span
+            style={{
+              fontSize: 12,
+              color: "var(--text-tertiary)",
+            }}
+          >
+            Reviews that have exceeded their TAT
+          </span>
+        </div>
+        {overdueReviews.length === 0 ? (
+          <div className="empty-state">
+            <p>✓ All reviews are within TAT.</p>
+          </div>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Task</th>
+                <th>Assignee</th>
+                <th>Reviewer</th>
+                <th>Review started</th>
+                <th>TAT</th>
+                <th>Days late</th>
+              </tr>
+            </thead>
+            <tbody>
+              {overdueReviews.map((t) => (
+                <tr key={t.id}>
+                  <td style={{ fontWeight: 600 }}>{t.title}</td>
+                  <td>{t.assignee?.full_name || "—"}</td>
+                  <td style={{ fontWeight: 600 }}>{t.reviewerName}</td>
+                  <td>
+                    {new Date(t.review_started_at).toLocaleDateString("en-IN", {
+                      day: "numeric",
+                      month: "short",
+                    })}
+                  </td>
+                  <td>{t.review_tat_days}d</td>
+                  <td style={{ fontWeight: 700, color: "var(--danger)" }}>
+                    ⚠ {t.daysLate}d
                   </td>
                 </tr>
               ))}

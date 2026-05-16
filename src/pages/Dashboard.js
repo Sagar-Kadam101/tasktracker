@@ -1,5 +1,5 @@
 // src/pages/Dashboard.js — drop-in replacement
-// This is your "My Tasks" page. Big serif welcome, grouped task lists.
+// Adds "Tasks awaiting your review" section. Reviewer + TAT-aware.
 
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -30,6 +30,11 @@ export default function Dashboard({ profile }) {
   const mine = tasks.filter((t) => t.assignee_id === profile?.id);
   const open = mine.filter((t) => t.status !== "Done");
 
+  // Tasks where I am the reviewer and they're currently In Review
+  const toReview = tasks.filter(
+    (t) => t.reviewer_id === profile?.id && t.status === "In Review"
+  );
+
   const isOverdue = (t) =>
     t.due_date && new Date(t.due_date) < today && t.status !== "Done";
   const isToday = (t) =>
@@ -41,6 +46,23 @@ export default function Dashboard({ profile }) {
     t.status !== "Done";
   const isLater = (t) =>
     t.due_date && new Date(t.due_date) > week && t.status !== "Done";
+
+  // Helper: is this review past its TAT?
+  const isReviewOverdue = (t) =>
+    t.status === "In Review" &&
+    t.review_started_at &&
+    t.review_tat_days &&
+    new Date(t.review_started_at).getTime() + t.review_tat_days * 86400000 <
+      Date.now();
+
+  // Helper: days remaining (or overdue) for review
+  const reviewDays = (t) => {
+    if (!t.review_started_at || !t.review_tat_days) return null;
+    const dueMs =
+      new Date(t.review_started_at).getTime() + t.review_tat_days * 86400000;
+    const diffMs = dueMs - Date.now();
+    return Math.ceil(Math.abs(diffMs) / 86400000) * (diffMs < 0 ? -1 : 1);
+  };
 
   const groups = [
     { label: "Overdue", tasks: mine.filter(isOverdue), tone: "var(--danger)" },
@@ -64,6 +86,8 @@ export default function Dashboard({ profile }) {
     upcoming: open.filter((t) => t.due_date && new Date(t.due_date) > today)
       .length,
     done: mine.filter((t) => t.status === "Done").length,
+    toReview: toReview.length,
+    reviewOverdue: toReview.filter(isReviewOverdue).length,
   };
 
   const firstName = profile?.full_name?.split(" ")[0] || "there";
@@ -99,6 +123,14 @@ export default function Dashboard({ profile }) {
           <p className="page-sub">
             {open.length} open · {counts.overdue} overdue · {counts.done}{" "}
             completed
+            {counts.toReview > 0 && (
+              <>
+                {" · "}
+                <span style={{ color: "var(--primary)", fontWeight: 600 }}>
+                  {counts.toReview} to review
+                </span>
+              </>
+            )}
           </p>
         </div>
       </div>
@@ -129,6 +161,129 @@ export default function Dashboard({ profile }) {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {/* TASKS AWAITING YOUR REVIEW — pinned at top when present */}
+        {toReview.length > 0 && (
+          <section
+            className="card"
+            style={{
+              padding: 0,
+              overflow: "hidden",
+              borderTop: "3px solid var(--primary)",
+            }}
+          >
+            <header
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "14px 18px",
+                borderBottom: "1px solid var(--border)",
+              }}
+            >
+              <span style={{ fontSize: 18 }}>👁</span>
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  letterSpacing: -0.1,
+                }}
+              >
+                Tasks awaiting your review
+              </h3>
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  color: "var(--text-secondary)",
+                  background: "var(--bg-soft)",
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  fontWeight: 600,
+                }}
+              >
+                {toReview.length}
+              </span>
+              {counts.reviewOverdue > 0 && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--danger)",
+                    background: "rgba(220, 38, 38, 0.10)",
+                    padding: "2px 8px",
+                    borderRadius: 999,
+                    fontWeight: 700,
+                  }}
+                >
+                  {counts.reviewOverdue} overdue
+                </span>
+              )}
+            </header>
+            <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+              {toReview.map((t) => {
+                const days = reviewDays(t);
+                const overdue = isReviewOverdue(t);
+                const assignee = people.find((p) => p.id === t.assignee_id);
+                return (
+                  <li
+                    key={t.id}
+                    onClick={() => navigate("/board")}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14,
+                      padding: "12px 18px",
+                      borderBottom: "1px solid var(--border)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>👁</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontWeight: 500,
+                          fontSize: 13.5,
+                          color: "var(--text-primary)",
+                        }}
+                      >
+                        {t.title}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-secondary)",
+                          fontFamily: "var(--font-mono)",
+                          marginTop: 3,
+                          display: "flex",
+                          gap: 12,
+                        }}
+                      >
+                        {assignee && <span>by {assignee.full_name}</span>}
+                        {t.category && <span>{t.category}</span>}
+                        {t.priority && <span>{t.priority}</span>}
+                      </div>
+                    </div>
+                    {days !== null && (
+                      <span
+                        style={{
+                          fontSize: 11.5,
+                          fontFamily: "var(--font-mono)",
+                          fontWeight: 700,
+                          color: overdue ? "var(--danger)" : "var(--success)",
+                        }}
+                      >
+                        {overdue
+                          ? `⚠ ${Math.abs(days)}d late`
+                          : `${days}d left`}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+
         {groups
           .filter((g) => g.tasks.length)
           .map((g) => (
@@ -271,7 +426,7 @@ export default function Dashboard({ profile }) {
             </section>
           ))}
 
-        {mine.length === 0 && (
+        {mine.length === 0 && toReview.length === 0 && (
           <div className="card">
             <p
               style={{

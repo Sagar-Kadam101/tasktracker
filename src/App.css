@@ -1136,3 +1136,132 @@ body[data-theme="terminal"] .google-btn {
     display: none;
   }
 }
+
+/* ────────────────────────────────────────
+    FILTER DROPDOWNS (added for filter bar redesign)
+    ──────────────────────────────────────── */
+.filter-dropdown {
+  position: relative;
+  display: inline-block;
+}
+.filter-dropdown-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.15s;
+  font-family: var(--font);
+  white-space: nowrap;
+}
+.filter-dropdown-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+.filter-dropdown-btn.has-value {
+  border-color: var(--primary);
+  background: var(--primary-light, rgba(91, 76, 245, 0.08));
+  color: var(--primary);
+  font-weight: 600;
+}
+.filter-dropdown-btn .caret {
+  font-size: 9px;
+  opacity: 0.6;
+}
+.filter-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 100;
+  min-width: 200px;
+  max-width: 280px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  padding: 4px;
+}
+.filter-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--font);
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  font-weight: 500;
+}
+.filter-dropdown-item:hover {
+  background: var(--bg-soft);
+}
+.filter-dropdown-item.selected {
+  background: var(--primary-light, rgba(91, 76, 245, 0.1));
+  color: var(--primary);
+  font-weight: 600;
+}
+.filter-dropdown-item .check {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--primary);
+}
+.filter-search-input {
+  width: 220px;
+  font-size: 13px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: var(--font);
+}
+.filter-search-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+.filter-clear-link {
+  font-size: 12px;
+  color: var(--primary);
+  cursor: pointer;
+  font-weight: 600;
+  background: none;
+  border: none;
+  padding: 4px 8px;
+  font-family: var(--font);
+}
+.filter-clear-link:hover {
+  text-decoration: underline;
+}
+.filter-active-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  margin-left: 8px;
+}
+
+/* Review overdue badge on cards */
+.review-overdue-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--danger);
+  color: white;
+  margin-left: 4px;
+}
