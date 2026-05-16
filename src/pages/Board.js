@@ -42,6 +42,7 @@ export default function Board({ profile }) {
   const [selectedTask, setSelectedTask] = useState(null);
   const [filterCat, setFilterCat] = useState("All");
   const [filterAssignee, setFilterAssignee] = useState("All");
+  const [filterTag, setFilterTag] = useState("All");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(defaultForm());
@@ -277,10 +278,28 @@ export default function Board({ profile }) {
     setFileLinks(fileLinks.filter((_, i) => i !== index));
   }
 
+  // Helper: parse a tags string into a clean array of trimmed tags
+  const parseTags = (raw) =>
+    raw
+      ? raw
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : [];
+
+  // Build a sorted list of all unique tags currently used across tasks
+  const allTags = Array.from(
+    new Set(tasks.flatMap((t) => parseTags(t.tags)))
+  ).sort();
+
   const filtered = tasks.filter((t) => {
     if (filterCat !== "All" && t.category !== filterCat) return false;
     if (filterAssignee !== "All" && t.assignee_id !== filterAssignee)
       return false;
+    if (filterTag !== "All") {
+      const tagList = parseTags(t.tags);
+      if (!tagList.includes(filterTag)) return false;
+    }
     return true;
   });
 
@@ -392,6 +411,35 @@ export default function Board({ profile }) {
             {m.full_name?.split(" ")[0]}
           </button>
         ))}
+        {allTags.length > 0 && (
+          <>
+            <span
+              style={{
+                fontSize: 12,
+                color: "var(--text-tertiary)",
+                fontWeight: 600,
+                marginLeft: 8,
+              }}
+            >
+              Tag:
+            </span>
+            <button
+              className={`filter-pill${filterTag === "All" ? " active" : ""}`}
+              onClick={() => setFilterTag("All")}
+            >
+              All
+            </button>
+            {allTags.map((tag) => (
+              <button
+                key={tag}
+                className={`filter-pill${filterTag === tag ? " active" : ""}`}
+                onClick={() => setFilterTag(tag)}
+              >
+                #{tag}
+              </button>
+            ))}
+          </>
+        )}
       </div>
 
       {/* Kanban Board */}
@@ -658,7 +706,37 @@ export default function Board({ profile }) {
                       Tags
                     </div>
                     <div style={{ fontSize: 13, color: "var(--text-primary)" }}>
-                      {selectedTask.tags || "—"}
+                      {selectedTask.tags ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 4,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          {selectedTask.tags
+                            .split(",")
+                            .map((t) => t.trim())
+                            .filter(Boolean)
+                            .map((tag, i) => (
+                              <span
+                                key={i}
+                                style={{
+                                  fontSize: 11,
+                                  padding: "3px 10px",
+                                  borderRadius: 10,
+                                  background: "var(--bg)",
+                                  color: "var(--text-secondary)",
+                                  border: "1px solid var(--border)",
+                                }}
+                              >
+                                #{tag}
+                              </span>
+                            ))}
+                        </div>
+                      ) : (
+                        "—"
+                      )}
                     </div>
                   </div>
                   <div>
@@ -1351,6 +1429,63 @@ export default function Board({ profile }) {
                   onChange={(e) => setForm({ ...form, tags: e.target.value })}
                   placeholder="e.g. urgent, client, Q2"
                 />
+                {allTags.length > 0 && (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 4,
+                      flexWrap: "wrap",
+                      marginTop: 6,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 10,
+                        color: "var(--text-tertiary)",
+                        alignSelf: "center",
+                        marginRight: 2,
+                      }}
+                    >
+                      Recent:
+                    </span>
+                    {allTags.slice(0, 10).map((tag) => {
+                      const current = form.tags
+                        ? form.tags
+                            .split(",")
+                            .map((t) => t.trim())
+                            .filter(Boolean)
+                        : [];
+                      const alreadyAdded = current.includes(tag);
+                      return (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => {
+                            if (alreadyAdded) return;
+                            const newTags = [...current, tag].join(", ");
+                            setForm({ ...form, tags: newTags });
+                          }}
+                          style={{
+                            fontSize: 10,
+                            padding: "2px 8px",
+                            borderRadius: 10,
+                            background: alreadyAdded
+                              ? "var(--primary-light, #EEECff)"
+                              : "var(--bg)",
+                            color: alreadyAdded
+                              ? "var(--primary)"
+                              : "var(--text-secondary)",
+                            border: "1px solid var(--border)",
+                            cursor: alreadyAdded ? "default" : "pointer",
+                            opacity: alreadyAdded ? 0.6 : 1,
+                          }}
+                        >
+                          {alreadyAdded ? "✓ " : "+ "}#{tag}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className="form-group">
@@ -1524,6 +1659,36 @@ function TaskCard({
           <span className="badge badge-recurring">⟳ {task.recurrence}</span>
         )}
       </div>
+      {task.tags && (
+        <div
+          style={{
+            display: "flex",
+            gap: 4,
+            flexWrap: "wrap",
+            marginBottom: 6,
+          }}
+        >
+          {task.tags
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean)
+            .map((tag, i) => (
+              <span
+                key={i}
+                style={{
+                  fontSize: 10,
+                  padding: "2px 8px",
+                  borderRadius: 10,
+                  background: "var(--bg)",
+                  color: "var(--text-secondary)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                #{tag}
+              </span>
+            ))}
+        </div>
+      )}
       {task.blocked_by_task && (
         <div className="dep-tag">
           ⛔ Blocked by: {task.blocked_by_task.title}
