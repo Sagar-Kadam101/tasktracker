@@ -1,5 +1,5 @@
 // src/App.js — drop-in replacement
-// Fixes the role bug: first user = admin, everyone after = member.
+// Adds /projects and /projects/:id routes.
 
 import React, { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
@@ -12,6 +12,8 @@ import Reports from "./pages/Reports";
 import Archive from "./pages/Archive";
 import AdminPanel from "./pages/AdminPanel";
 import Team from "./pages/Team";
+import Projects from "./pages/Projects";
+import ProjectDetail from "./pages/ProjectDetail";
 import Sidebar from "./components/Sidebar";
 import "./App.css";
 
@@ -75,7 +77,6 @@ export default function App() {
         const { data: userData } = await supabase.auth.getUser();
 
         // First user to ever sign up becomes admin. Everyone else is a member.
-        // Admin can later promote someone via the Admin Panel.
         const { count: adminCount } = await supabase
           .from("profiles")
           .select("*", { count: "exact", head: true })
@@ -134,6 +135,11 @@ export default function App() {
             <Route
               path="/calendar"
               element={<CalendarView profile={profile} />}
+            />
+            <Route path="/projects" element={<Projects profile={profile} />} />
+            <Route
+              path="/projects/:id"
+              element={<ProjectDetail profile={profile} />}
             />
             <Route path="/team" element={<Team profile={profile} />} />
             <Route path="/reports" element={<Reports profile={profile} />} />

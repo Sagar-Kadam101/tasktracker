@@ -1,13 +1,15 @@
 // src/components/Sidebar.js — drop-in replacement
-// Adds "My Tasks" and "Team" to the navigation.
+// Adds "Projects" nav item between Board and Calendar.
+// Still fetches workspace name from settings table.
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
 const NAV = [
   { to: "/dashboard", label: "My Tasks", icon: <HomeIcon /> },
   { to: "/board", label: "Board", icon: <KanbanIcon /> },
+  { to: "/projects", label: "Projects", icon: <FolderIcon /> },
   { to: "/calendar", label: "Calendar", icon: <CalIcon /> },
   { to: "/team", label: "Team", icon: <PeopleIcon /> },
   { to: "/reports", label: "Reports", icon: <ChartIcon /> },
@@ -16,6 +18,36 @@ const NAV = [
 
 export default function Sidebar({ profile }) {
   const navigate = useNavigate();
+  const [workspaceName, setWorkspaceName] = useState("TaskFlow");
+  const [workspaceInitial, setWorkspaceInitial] = useState("T");
+
+  useEffect(() => {
+    async function loadWorkspaceName() {
+      try {
+        const { data } = await supabase
+          .from("settings")
+          .select("value")
+          .eq("key", "workspace")
+          .single();
+        if (data && data.value) {
+          const parsed = JSON.parse(data.value);
+          if (parsed.workspace_name) {
+            setWorkspaceName(parsed.workspace_name);
+            setWorkspaceInitial(parsed.workspace_name.charAt(0).toUpperCase());
+          }
+        }
+      } catch (e) {
+        // No settings yet — keep default
+      }
+    }
+    loadWorkspaceName();
+    function onFocus() {
+      loadWorkspaceName();
+    }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
   const initials = profile?.full_name
     ? profile.full_name
         .split(" ")
@@ -44,8 +76,8 @@ export default function Sidebar({ profile }) {
     <aside className="sidebar">
       <div className="sidebar-logo">
         <div className="sidebar-logo-row">
-          <div className="sidebar-logo-icon">T</div>
-          <span className="sidebar-logo-text">TaskFlow</span>
+          <div className="sidebar-logo-icon">{workspaceInitial}</div>
+          <span className="sidebar-logo-text">{workspaceName}</span>
         </div>
       </div>
       <nav className="sidebar-nav">
@@ -108,6 +140,13 @@ function KanbanIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <rect x="3" y="3" width="7" height="18" rx="1" />
       <rect x="14" y="3" width="7" height="11" rx="1" />
+    </svg>
+  );
+}
+function FolderIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
     </svg>
   );
 }
