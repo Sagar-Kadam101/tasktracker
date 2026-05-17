@@ -40,6 +40,119 @@ export default function ProjectDetail({ profile }) {
   const [importSaving, setImportSaving] = useState(false);
   const [importFileName, setImportFileName] = useState("");
 
+  // Tracks save state per row in the grid: { taskId: 'saving' | 'saved' | 'error' }
+  const [rowSaveStatus, setRowSaveStatus] = useState({});
+  const [addingRow, setAddingRow] = useState(false);
+
+  // Permission check — can current user edit this task?
+  function canEditRow(t) {
+    if (!t || !profile) return false;
+    if (profile.role === "admin") return true;
+    if (t.created_by === profile.id) return true;
+    if (t.assignee_id === profile.id) return true;
+    if (t.reviewer_id === profile.id) return true;
+    return false;
+  }
+
+  // Save a single field change for a row. Updates DB, refreshes the row from server.
+  async function saveCell(taskId, field, value) {
+    // Don't bother if value is unchanged
+    const current = tasks.find((t) => t.id === taskId);
+    if (current && current[field] === value) return;
+
+    setRowSaveStatus((s) => ({ ...s, [taskId]: "saving" }));
+    const updates = { [field]: value === "" ? null : value };
+
+    // If TAT changes but no reviewer, clear TAT
+    if (field === "review_tat_days" && current && !current.reviewer_id) {
+      updates.review_tat_days = null;
+    }
+    // If status moves to In Review and no review_started_at, set it
+    if (
+      field === "status" &&
+      value === "In Review" &&
+      current &&
+      current.status !== "In Review"
+    ) {
+      updates.review_started_at = new Date().toISOString();
+      updates.review_completed_at = null;
+    }
+    if (
+      field === "status" &&
+      current &&
+      current.status === "In Review" &&
+      value !== "In Review"
+    ) {
+      updates.review_completed_at = new Date().toISOString();
+    }
+    if (field === "status" && value === "Done") {
+      updates.completed_at = new Date().toISOString();
+    }
+
+    const { error } = await supabase
+      .from("tasks")
+      .update(updates)
+      .eq("id", taskId);
+
+    if (error) {
+      console.error(error);
+      setRowSaveStatus((s) => ({ ...s, [taskId]: "error" }));
+      showToast("⚠ Save failed: " + error.message, "warn");
+      return;
+    }
+    setRowSaveStatus((s) => ({ ...s, [taskId]: "saved" }));
+    // Clear "saved" indicator after 2 seconds
+    setTimeout(() => {
+      setRowSaveStatus((s) => {
+        const next = { ...s };
+        if (next[taskId] === "saved") delete next[taskId];
+        return next;
+      });
+    }, 2000);
+    // Refresh just this row in local state to keep it in sync
+    const { data: refreshed } = await supabase
+      .from("tasks")
+      .select("*, assignee:profiles!tasks_assignee_id_fkey(id, full_name)")
+      .eq("id", taskId)
+      .single();
+    if (refreshed) {
+      setTasks((ts) => ts.map((t) => (t.id === taskId ? refreshed : t)));
+    }
+  }
+
+  // Add a new empty row to the grid (creates a task with placeholder title)
+  async function addNewRow() {
+    setAddingRow(true);
+    const payload = {
+      title: "Untitled task",
+      status: "To Do",
+      priority: "Medium",
+      visibility: "public",
+      task_type: "One-time",
+      recurrence: "None",
+      project_id: id,
+      created_by: profile?.id,
+      archived: false,
+    };
+    const { data, error } = await supabase
+      .from("tasks")
+      .insert(payload)
+      .select("*, assignee:profiles!tasks_assignee_id_fkey(id, full_name)")
+      .single();
+    if (error) {
+      console.error(error);
+      showToast("Could not add row: " + error.message, "warn");
+    } else {
+      setTasks((ts) => [...ts, data]);
+      // Try to focus the new row's title cell
+      setTimeout(() => {
+        const el = document.getElementById("grid-title-" + data.id);
+        if (el) el.focus();
+      }, 50);
+    }
+    setAddingRow(false);
+  }
+
   function quickDefaults() {
     return {
       title: "",
@@ -273,89 +386,6 @@ export default function ProjectDetail({ profile }) {
       .join(",");
     const csv = [commentRow, headerRow, example1, example2].join("\n");
     downloadBlob(csv, "task-template.csv", "text/csv");
-  }
-
-  function colNumberToLetter(n) {
-    let s = "";
-    n++;
-    while (n > 0) {
-      const r = (n - 1) % 26;
-      s = String.fromCharCode(65 + r) + s;
-      n = Math.floor((n - 1) / 26);
-    }
-    return s;
-  }
-
-  function downloadXlsxTemplate() {
-    const columns = getColumnNames();
-    const required = getRequiredColumns();
-    const headers = columns.map((c) => (required.includes(c) ? c + "*" : c));
-    const example1 = columns.map(
-      (c) => TASK_SCHEMA.find((x) => x.column === c).example || ""
-    );
-    const example2 = columns.map((c) => (c === "title" ? "Another task" : ""));
-    const taskSheet = XLSX.utils.aoa_to_sheet([headers, example1, example2]);
-
-    const ranges = [];
-    columns.forEach((c, idx) => {
-      const f = TASK_SCHEMA.find((x) => x.column === c);
-      if (f.type === "enum") {
-        const colLetter = colNumberToLetter(idx);
-        const list = '"' + f.values.join(",") + '"';
-        ranges.push({
-          sqref: colLetter + "2:" + colLetter + "1000",
-          type: "list",
-          formula1: list,
-          allowBlank: true,
-          showErrorMessage: true,
-          errorTitle: "Invalid value",
-          error: "Must be one of: " + f.values.join(", "),
-        });
-      }
-    });
-    if (ranges.length > 0) taskSheet["!dataValidation"] = ranges;
-    taskSheet["!cols"] = columns.map(() => ({ wch: 22 }));
-
-    const instr = [
-      ["TaskFlow — Bulk Task Import Template"],
-      [""],
-      ["How to use:"],
-      ["1. Fill the Tasks sheet — one task per row"],
-      ["2. Columns marked with * are required"],
-      ["3. Enum columns show dropdowns (click the cell)"],
-      ["4. Save the file"],
-      ["5. Upload in the app's Import tab"],
-      [""],
-      ["Column reference:"],
-      ["Column", "Required", "Type", "Description"],
-      ...TASK_SCHEMA.map((f) => [
-        f.column,
-        f.required ? "YES" : "",
-        f.type + (f.type === "enum" ? " (" + f.values.join("/") + ")" : ""),
-        f.description,
-      ]),
-    ];
-    const instrSheet = XLSX.utils.aoa_to_sheet(instr);
-    instrSheet["!cols"] = [{ wch: 22 }, { wch: 10 }, { wch: 30 }, { wch: 60 }];
-
-    const teamData = [
-      ["full_name", "email"],
-      ...members.map((m) => [m.full_name, m.email]),
-    ];
-    const teamSheet = XLSX.utils.aoa_to_sheet(teamData);
-    teamSheet["!cols"] = [{ wch: 28 }, { wch: 32 }];
-
-    const catData = [["name"], ...categories.map((c) => [c.name])];
-    const catSheet = XLSX.utils.aoa_to_sheet(catData);
-    catSheet["!cols"] = [{ wch: 28 }];
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, taskSheet, "Tasks");
-    XLSX.utils.book_append_sheet(wb, instrSheet, "Instructions");
-    XLSX.utils.book_append_sheet(wb, teamSheet, "Team Emails");
-    XLSX.utils.book_append_sheet(wb, catSheet, "Categories");
-
-    XLSX.writeFile(wb, "task-template.xlsx");
   }
 
   function splitCsvLine(line) {
@@ -778,139 +808,508 @@ export default function ProjectDetail({ profile }) {
       </div>
 
       {activeTab === "tasks" && (
-        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        <div>
           {tasks.length === 0 ? (
-            <div style={{ padding: 30, textAlign: "center" }}>
+            <div className="card" style={{ padding: 30, textAlign: "center" }}>
               <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
               <p style={{ color: "var(--text-secondary)", marginBottom: 8 }}>
                 No tasks yet in this project.
               </p>
-              <p style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
-                Use the tabs above to add tasks one at a time, paste a list, or
-                import from CSV/Excel.
+              <p
+                style={{
+                  fontSize: 12,
+                  color: "var(--text-tertiary)",
+                  marginBottom: 16,
+                }}
+              >
+                Add a row below, or use the other tabs to bulk paste or import.
               </p>
+              <button
+                className="btn btn-primary"
+                onClick={addNewRow}
+                disabled={addingRow}
+              >
+                {addingRow ? "Adding..." : "+ Add first task"}
+              </button>
             </div>
           ) : (
-            <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
-              {tasks.map((t) => {
-                const taskOverdue =
-                  t.due_date &&
-                  new Date(t.due_date) < today &&
-                  t.status !== "Done";
-                return (
-                  <li
-                    key={t.id}
+            <div
+              className="card"
+              style={{
+                padding: 0,
+                overflowX: "auto",
+                overflowY: "visible",
+              }}
+            >
+              <table
+                style={{
+                  width: "100%",
+                  minWidth: 1100,
+                  borderCollapse: "collapse",
+                  fontSize: 13,
+                  fontFamily: "var(--font)",
+                }}
+              >
+                <thead>
+                  <tr
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 14,
-                      padding: "12px 18px",
+                      background: "var(--bg-soft)",
                       borderBottom: "1px solid var(--border)",
                     }}
                   >
-                    <span
-                      style={{
-                        width: 14,
-                        height: 14,
-                        borderRadius: "50%",
-                        border:
-                          "1.5px solid " +
-                          (t.status === "Done"
-                            ? "var(--success)"
-                            : "var(--border-strong)"),
-                        background:
-                          t.status === "Done"
-                            ? "var(--success)"
-                            : "transparent",
-                        flex: "0 0 auto",
-                      }}
-                    />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
+                    {[
+                      { label: "Title", width: 240 },
+                      { label: "Status", width: 110 },
+                      { label: "Assignee", width: 130 },
+                      { label: "Reviewer", width: 130 },
+                      { label: "Priority", width: 90 },
+                      { label: "Category", width: 110 },
+                      { label: "Due", width: 130 },
+                      { label: "TAT", width: 60 },
+                      { label: "Vis.", width: 80 },
+                      { label: "", width: 110 },
+                    ].map((c) => (
+                      <th
+                        key={c.label}
                         style={{
-                          fontSize: 13.5,
-                          fontWeight: 500,
-                          color: "var(--text-primary)",
-                          textDecoration:
-                            t.status === "Done" ? "line-through" : "none",
-                        }}
-                      >
-                        {t.visibility === "private" && (
-                          <span title="Private" style={{ marginRight: 4 }}>
-                            🔒
-                          </span>
-                        )}
-                        {t.title}
-                      </div>
-                      <div
-                        style={{
+                          padding: "10px 12px",
+                          textAlign: "left",
+                          fontWeight: 600,
                           fontSize: 11,
-                          color: "var(--text-secondary)",
-                          fontFamily: "var(--font-mono)",
-                          marginTop: 3,
-                          display: "flex",
-                          gap: 12,
-                          flexWrap: "wrap",
+                          color: "var(--text-tertiary)",
+                          textTransform: "uppercase",
+                          letterSpacing: 0.4,
+                          width: c.width,
+                          minWidth: c.width,
                         }}
                       >
-                        {t.assignee && <span>👤 {t.assignee.full_name}</span>}
-                        {t.category && <span>{t.category}</span>}
-                        {t.priority && <span>{t.priority}</span>}
-                      </div>
-                    </div>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontFamily: "var(--font-mono)",
-                        color: taskOverdue
-                          ? "var(--danger)"
-                          : "var(--text-secondary)",
-                        fontWeight: taskOverdue ? 700 : 400,
-                      }}
-                    >
-                      {t.due_date || "—"}
-                    </span>
-                    <span
-                      className={
-                        "badge badge-" +
-                        (t.status || "").replace(/ /g, "").toLowerCase()
-                      }
-                    >
-                      {t.status}
-                    </span>
-                    <button
-                      onClick={() => handleDeleteTask(t.id)}
-                      style={{
-                        background: "none",
-                        border: "1px solid var(--border)",
-                        borderRadius: 6,
-                        padding: "4px 8px",
-                        cursor: "pointer",
-                        color: "var(--danger)",
-                        fontSize: 11,
-                      }}
-                      title="Delete this task"
-                    >
-                      🗑
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {hiddenCount > 0 && (
-            <div
-              style={{
-                padding: "10px 18px",
-                borderTop: "1px solid var(--border)",
-                fontSize: 11,
-                color: "var(--text-tertiary)",
-                fontStyle: "italic",
-                background: "var(--bg-soft)",
-              }}
-            >
-              🔒 {hiddenCount} private task{hiddenCount > 1 ? "s" : ""} in this
-              project (visible to you as admin).
+                        {c.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tasks.map((t) => {
+                    const editable = canEditRow(t);
+                    const savingState = rowSaveStatus[t.id];
+                    const taskOverdue =
+                      t.due_date &&
+                      new Date(t.due_date) < today &&
+                      t.status !== "Done";
+
+                    const cellStyle = {
+                      padding: "6px 10px",
+                      borderBottom: "1px solid var(--border)",
+                      verticalAlign: "middle",
+                    };
+                    const inputBase = {
+                      border: "1px solid transparent",
+                      background: "transparent",
+                      padding: "5px 8px",
+                      borderRadius: 4,
+                      fontSize: 13,
+                      fontFamily: "var(--font)",
+                      color: "var(--text-primary)",
+                      width: "100%",
+                      outline: "none",
+                      cursor: editable ? "text" : "not-allowed",
+                    };
+                    const inputFocusStyle = {
+                      borderColor: "var(--primary)",
+                      background: "var(--bg-card)",
+                    };
+                    const selectStyle = {
+                      ...inputBase,
+                      cursor: editable ? "pointer" : "not-allowed",
+                      appearance: "none",
+                    };
+
+                    return (
+                      <tr
+                        key={t.id}
+                        style={{
+                          background:
+                            savingState === "saving"
+                              ? "rgba(91, 76, 245, 0.04)"
+                              : savingState === "error"
+                              ? "rgba(220, 38, 38, 0.04)"
+                              : "transparent",
+                          transition: "background 0.2s",
+                        }}
+                      >
+                        {/* Title */}
+                        <td style={cellStyle}>
+                          <input
+                            id={"grid-title-" + t.id}
+                            type="text"
+                            defaultValue={t.title}
+                            disabled={!editable}
+                            style={inputBase}
+                            onFocus={(e) =>
+                              Object.assign(e.target.style, inputFocusStyle)
+                            }
+                            onBlur={(e) => {
+                              e.target.style.border = "1px solid transparent";
+                              e.target.style.background = "transparent";
+                              if (e.target.value !== t.title)
+                                saveCell(t.id, "title", e.target.value);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") e.target.blur();
+                              if (e.key === "Escape") {
+                                e.target.value = t.title;
+                                e.target.blur();
+                              }
+                            }}
+                          />
+                        </td>
+
+                        {/* Status */}
+                        <td style={cellStyle}>
+                          <select
+                            value={t.status || "To Do"}
+                            disabled={!editable}
+                            style={selectStyle}
+                            onFocus={(e) =>
+                              Object.assign(e.target.style, inputFocusStyle)
+                            }
+                            onBlur={(e) => {
+                              e.target.style.border = "1px solid transparent";
+                              e.target.style.background = "transparent";
+                            }}
+                            onChange={(e) =>
+                              saveCell(t.id, "status", e.target.value)
+                            }
+                          >
+                            {["To Do", "In Progress", "In Review", "Done"].map(
+                              (s) => (
+                                <option key={s} value={s}>
+                                  {s}
+                                </option>
+                              )
+                            )}
+                          </select>
+                        </td>
+
+                        {/* Assignee */}
+                        <td style={cellStyle}>
+                          <select
+                            value={t.assignee_id || ""}
+                            disabled={!editable}
+                            style={selectStyle}
+                            onFocus={(e) =>
+                              Object.assign(e.target.style, inputFocusStyle)
+                            }
+                            onBlur={(e) => {
+                              e.target.style.border = "1px solid transparent";
+                              e.target.style.background = "transparent";
+                            }}
+                            onChange={(e) =>
+                              saveCell(t.id, "assignee_id", e.target.value)
+                            }
+                          >
+                            <option value="">— Unassigned —</option>
+                            {members.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.full_name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+
+                        {/* Reviewer */}
+                        <td style={cellStyle}>
+                          <select
+                            value={t.reviewer_id || ""}
+                            disabled={!editable}
+                            style={selectStyle}
+                            onFocus={(e) =>
+                              Object.assign(e.target.style, inputFocusStyle)
+                            }
+                            onBlur={(e) => {
+                              e.target.style.border = "1px solid transparent";
+                              e.target.style.background = "transparent";
+                            }}
+                            onChange={(e) =>
+                              saveCell(t.id, "reviewer_id", e.target.value)
+                            }
+                          >
+                            <option value="">— No reviewer —</option>
+                            {members.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.full_name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+
+                        {/* Priority */}
+                        <td style={cellStyle}>
+                          <select
+                            value={t.priority || "Medium"}
+                            disabled={!editable}
+                            style={{
+                              ...selectStyle,
+                              color:
+                                t.priority === "High"
+                                  ? "var(--danger)"
+                                  : t.priority === "Low"
+                                  ? "var(--text-tertiary)"
+                                  : "var(--text-primary)",
+                              fontWeight: t.priority === "High" ? 600 : 400,
+                            }}
+                            onFocus={(e) =>
+                              Object.assign(e.target.style, inputFocusStyle)
+                            }
+                            onBlur={(e) => {
+                              e.target.style.border = "1px solid transparent";
+                              e.target.style.background = "transparent";
+                            }}
+                            onChange={(e) =>
+                              saveCell(t.id, "priority", e.target.value)
+                            }
+                          >
+                            <option value="High">High</option>
+                            <option value="Medium">Medium</option>
+                            <option value="Low">Low</option>
+                          </select>
+                        </td>
+
+                        {/* Category */}
+                        <td style={cellStyle}>
+                          <select
+                            value={t.category || ""}
+                            disabled={!editable}
+                            style={selectStyle}
+                            onFocus={(e) =>
+                              Object.assign(e.target.style, inputFocusStyle)
+                            }
+                            onBlur={(e) => {
+                              e.target.style.border = "1px solid transparent";
+                              e.target.style.background = "transparent";
+                            }}
+                            onChange={(e) =>
+                              saveCell(t.id, "category", e.target.value)
+                            }
+                          >
+                            <option value="">—</option>
+                            {categories.map((c) => (
+                              <option key={c.id} value={c.name}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+
+                        {/* Due date */}
+                        <td style={cellStyle}>
+                          <input
+                            type="date"
+                            defaultValue={t.due_date || ""}
+                            disabled={!editable}
+                            style={{
+                              ...inputBase,
+                              color: taskOverdue
+                                ? "var(--danger)"
+                                : "var(--text-primary)",
+                              fontWeight: taskOverdue ? 600 : 400,
+                            }}
+                            onFocus={(e) =>
+                              Object.assign(e.target.style, inputFocusStyle)
+                            }
+                            onBlur={(e) => {
+                              e.target.style.border = "1px solid transparent";
+                              e.target.style.background = "transparent";
+                              if (e.target.value !== (t.due_date || ""))
+                                saveCell(t.id, "due_date", e.target.value);
+                            }}
+                          />
+                        </td>
+
+                        {/* TAT */}
+                        <td style={cellStyle}>
+                          <input
+                            type="number"
+                            min="1"
+                            max="30"
+                            defaultValue={t.review_tat_days || ""}
+                            disabled={!editable || !t.reviewer_id}
+                            placeholder={t.reviewer_id ? "2" : "—"}
+                            style={inputBase}
+                            onFocus={(e) =>
+                              Object.assign(e.target.style, inputFocusStyle)
+                            }
+                            onBlur={(e) => {
+                              e.target.style.border = "1px solid transparent";
+                              e.target.style.background = "transparent";
+                              const v = e.target.value
+                                ? parseInt(e.target.value, 10)
+                                : null;
+                              if (v !== t.review_tat_days)
+                                saveCell(t.id, "review_tat_days", v);
+                            }}
+                          />
+                        </td>
+
+                        {/* Visibility */}
+                        <td style={cellStyle}>
+                          <select
+                            value={t.visibility || "public"}
+                            disabled={!editable}
+                            style={selectStyle}
+                            onFocus={(e) =>
+                              Object.assign(e.target.style, inputFocusStyle)
+                            }
+                            onBlur={(e) => {
+                              e.target.style.border = "1px solid transparent";
+                              e.target.style.background = "transparent";
+                            }}
+                            onChange={(e) =>
+                              saveCell(t.id, "visibility", e.target.value)
+                            }
+                          >
+                            <option value="public">🌐 Public</option>
+                            <option value="private">🔒 Private</option>
+                          </select>
+                        </td>
+
+                        {/* Actions */}
+                        <td
+                          style={{
+                            ...cellStyle,
+                            textAlign: "right",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {savingState === "saving" && (
+                            <span
+                              style={{
+                                fontSize: 10,
+                                color: "var(--primary)",
+                                marginRight: 6,
+                                fontFamily: "var(--font-mono)",
+                              }}
+                            >
+                              Saving…
+                            </span>
+                          )}
+                          {savingState === "saved" && (
+                            <span
+                              style={{
+                                fontSize: 10,
+                                color: "var(--success)",
+                                marginRight: 6,
+                                fontFamily: "var(--font-mono)",
+                              }}
+                            >
+                              ✓ Saved
+                            </span>
+                          )}
+                          {savingState === "error" && (
+                            <span
+                              style={{
+                                fontSize: 10,
+                                color: "var(--danger)",
+                                marginRight: 6,
+                                fontFamily: "var(--font-mono)",
+                              }}
+                              title="Save failed — try editing the cell again"
+                            >
+                              ⚠ Error
+                            </span>
+                          )}
+                          <button
+                            onClick={() => navigate("/board")}
+                            title="Open in Board (for comments, subtasks, files)"
+                            style={{
+                              background: "none",
+                              border: "1px solid var(--border)",
+                              borderRadius: 5,
+                              padding: "3px 7px",
+                              cursor: "pointer",
+                              fontSize: 11,
+                              marginRight: 4,
+                              color: "var(--text-secondary)",
+                            }}
+                          >
+                            ↗
+                          </button>
+                          <button
+                            onClick={() => handleDeleteTask(t.id)}
+                            disabled={!editable}
+                            title="Delete task"
+                            style={{
+                              background: "none",
+                              border: "1px solid var(--border)",
+                              borderRadius: 5,
+                              padding: "3px 7px",
+                              cursor: editable ? "pointer" : "not-allowed",
+                              fontSize: 11,
+                              color: "var(--danger)",
+                              opacity: editable ? 1 : 0.4,
+                            }}
+                          >
+                            🗑
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {/* Add row button */}
+              <div
+                style={{
+                  padding: "10px 14px",
+                  borderTop: "1px solid var(--border)",
+                  background: "var(--bg-soft)",
+                }}
+              >
+                <button
+                  onClick={addNewRow}
+                  disabled={addingRow}
+                  style={{
+                    background: "none",
+                    border: "1px dashed var(--border-strong)",
+                    borderRadius: 6,
+                    padding: "6px 14px",
+                    cursor: addingRow ? "wait" : "pointer",
+                    fontSize: 12,
+                    fontWeight: 500,
+                    color: "var(--primary)",
+                    fontFamily: "var(--font)",
+                  }}
+                >
+                  {addingRow ? "Adding…" : "+ Add row"}
+                </button>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--text-tertiary)",
+                    marginLeft: 10,
+                  }}
+                >
+                  Edits save automatically. Click any cell to edit.
+                </span>
+              </div>
+
+              {hiddenCount > 0 && (
+                <div
+                  style={{
+                    padding: "10px 18px",
+                    borderTop: "1px solid var(--border)",
+                    fontSize: 11,
+                    color: "var(--text-tertiary)",
+                    fontStyle: "italic",
+                    background: "var(--bg-soft)",
+                  }}
+                >
+                  🔒 {hiddenCount} private task
+                  {hiddenCount > 1 ? "s" : ""} in this project (visible to you
+                  as admin).
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1300,9 +1699,6 @@ export default function ProjectDetail({ profile }) {
           >
             <button className="btn btn-ghost" onClick={downloadCsvTemplate}>
               ⬇ CSV template
-            </button>
-            <button className="btn btn-ghost" onClick={downloadXlsxTemplate}>
-              ⬇ Excel template (with dropdowns)
             </button>
           </div>
           <div
