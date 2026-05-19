@@ -8,6 +8,7 @@ import { supabase } from "../lib/supabase";
 
 const NAV = [
   { to: "/dashboard", label: "My Tasks", icon: <HomeIcon /> },
+  { to: "/personal", label: "My List", icon: <ListIcon /> },
   { to: "/board", label: "Board", icon: <KanbanIcon /> },
   { to: "/projects", label: "Projects", icon: <FolderIcon /> },
   { to: "/calendar", label: "Calendar", icon: <CalIcon /> },
@@ -135,6 +136,19 @@ function HomeIcon() {
     </svg>
   );
 }
+function ListIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <line x1="9" y1="6" x2="20" y2="6" />
+      <line x1="9" y1="12" x2="20" y2="12" />
+      <line x1="9" y1="18" x2="20" y2="18" />
+      <circle cx="4.5" cy="6" r="1.5" />
+      <circle cx="4.5" cy="12" r="1.5" />
+      <circle cx="4.5" cy="18" r="1.5" />
+    </svg>
+  );
+}
+
 function KanbanIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

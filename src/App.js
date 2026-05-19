@@ -1,5 +1,5 @@
 // src/App.js — drop-in replacement
-// Adds /projects and /projects/:id routes.
+// Adds /personal route for the Personal Task List feature.
 
 import React, { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
@@ -14,6 +14,7 @@ import AdminPanel from "./pages/AdminPanel";
 import Team from "./pages/Team";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
+import PersonalList from "./pages/PersonalList";
 import Sidebar from "./components/Sidebar";
 import "./App.css";
 
@@ -75,13 +76,10 @@ export default function App() {
         .single();
       if (error) {
         const { data: userData } = await supabase.auth.getUser();
-
-        // First user to ever sign up becomes admin. Everyone else is a member.
         const { count: adminCount } = await supabase
           .from("profiles")
           .select("*", { count: "exact", head: true })
           .eq("role", "admin");
-
         const assignedRole = adminCount && adminCount > 0 ? "member" : "admin";
 
         await supabase.from("profiles").insert({
@@ -114,7 +112,7 @@ export default function App() {
     return (
       <div className="loading-screen">
         <div className="loader"></div>
-        <p>Loading TaskFlow...</p>
+        <p>Loading...</p>
       </div>
     );
 
@@ -130,6 +128,10 @@ export default function App() {
             <Route
               path="/dashboard"
               element={<Dashboard profile={profile} />}
+            />
+            <Route
+              path="/personal"
+              element={<PersonalList profile={profile} />}
             />
             <Route path="/board" element={<Board profile={profile} />} />
             <Route
