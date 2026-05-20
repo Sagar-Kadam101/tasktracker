@@ -229,12 +229,16 @@ export default function Board({ profile }) {
           .eq("id", editTask.id);
         if (error) {
           console.error("Update error:", error);
+          showToast("⚠ Save failed: " + error.message, "warn");
+          setSaving(false);
           return;
         }
       } else {
         const { error } = await supabase.from("tasks").insert(payload);
         if (error) {
           console.error("Insert error:", error);
+          showToast("⚠ Create failed: " + error.message, "warn");
+          setSaving(false);
           return;
         }
       }
@@ -246,6 +250,7 @@ export default function Board({ profile }) {
       if (autoAssignedToast) showToast(autoAssignedToast);
     } catch (err) {
       console.error("Submit error:", err);
+      showToast("⚠ Something went wrong: " + (err?.message || err), "warn");
     } finally {
       setSaving(false);
     }
@@ -296,14 +301,48 @@ export default function Board({ profile }) {
   }
 
   async function archiveTask(taskId) {
-    await supabase
+    const { error } = await supabase
       .from("tasks")
       .update({
         archived: true,
         completed_at: new Date().toISOString(),
       })
       .eq("id", taskId);
+    if (error) {
+      console.error("Archive error:", error);
+      showToast("⚠ Archive failed: " + error.message, "warn");
+      return;
+    }
     setShowDetailModal(false);
+    await fetchAll();
+  }
+
+  // Permission check — only admins and the task's creator can delete permanently
+  function canDeleteTask(task) {
+    if (!task || !profile) return false;
+    return profile.role === "admin" || task.created_by === profile.id;
+  }
+
+  // Permanent deletion — cascades to comments and subtasks (via FK ON DELETE CASCADE)
+  async function deleteTask(taskId) {
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    if (!canDeleteTask(task)) {
+      showToast("⚠ You don't have permission to delete this task.", "warn");
+      return;
+    }
+    const ok = window.confirm(
+      `Delete "${task.title}"?\n\nThis is permanent and cannot be undone. All comments, subtasks, and history for this task will also be deleted.`
+    );
+    if (!ok) return;
+    const { error } = await supabase.from("tasks").delete().eq("id", taskId);
+    if (error) {
+      console.error("Delete error:", error);
+      showToast("⚠ Delete failed: " + error.message, "warn");
+      return;
+    }
+    setShowDetailModal(false);
+    showToast("✓ Task deleted permanently");
     await fetchAll();
   }
 
@@ -1290,6 +1329,25 @@ export default function Board({ profile }) {
                   >
                     Archive
                   </button>
+                  {canDeleteTask(selectedTask) && (
+                    <button
+                      style={{
+                        fontSize: 12,
+                        background: "none",
+                        border: "1px solid var(--danger)",
+                        color: "var(--danger)",
+                        padding: "6px 14px",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                        fontFamily: "var(--font)",
+                        fontWeight: 500,
+                      }}
+                      onClick={() => deleteTask(selectedTask.id)}
+                      title="Permanently delete this task — admins and the creator only"
+                    >
+                      🗑 Delete permanently
+                    </button>
+                  )}
                 </div>
               </div>
             )}

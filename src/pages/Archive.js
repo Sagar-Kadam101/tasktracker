@@ -1,19 +1,83 @@
+// src/pages/Archive.js — drop-in replacement
+// Changes vs previous version:
+//   1. Accepts `profile` prop so we know if user is admin/creator (for delete)
+//   2. Fetches categories dynamically (was hardcoded — broke when admin added new ones)
+//   3. Admin/creator-only "🗑" delete button per row
+//   4. Per-row "Restore" button to un-archive a task (sends it back to the Board)
+
 import React, { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 
-export default function Archive() {
+export default function Archive({ profile }) {
   const [tasks, setTasks] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState("All");
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
-    supabase
-      .from("tasks")
-      .select("*, assignee:profiles!tasks_assignee_id_fkey(full_name)")
-      .eq("archived", true)
-      .order("completed_at", { ascending: false })
-      .then(({ data }) => setTasks(data || []));
+    fetchAll();
   }, []);
+
+  async function fetchAll() {
+    const [tRes, cRes] = await Promise.all([
+      supabase
+        .from("tasks")
+        .select("*, assignee:profiles!tasks_assignee_id_fkey(full_name)")
+        .eq("archived", true)
+        .order("completed_at", { ascending: false }),
+      supabase.from("categories").select("*").order("created_at"),
+    ]);
+    setTasks(tRes.data || []);
+    setCategories(cRes.data || []);
+  }
+
+  function showToast(msg, type = "info") {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 4000);
+  }
+
+  function canDeleteTask(task) {
+    if (!task || !profile) return false;
+    return profile.role === "admin" || task.created_by === profile.id;
+  }
+
+  async function deleteTask(task) {
+    if (!canDeleteTask(task)) {
+      showToast("⚠ You don't have permission to delete this task.", "warn");
+      return;
+    }
+    const ok = window.confirm(
+      `Delete "${task.title}" permanently?\n\nThis cannot be undone. All comments, subtasks, and history will also be deleted.`
+    );
+    if (!ok) return;
+    const { error } = await supabase.from("tasks").delete().eq("id", task.id);
+    if (error) {
+      console.error(error);
+      showToast("⚠ Delete failed: " + error.message, "warn");
+      return;
+    }
+    setTasks((arr) => arr.filter((t) => t.id !== task.id));
+    showToast("✓ Task deleted permanently");
+  }
+
+  async function restoreTask(task) {
+    const ok = window.confirm(
+      `Restore "${task.title}" back to the active Board?`
+    );
+    if (!ok) return;
+    const { error } = await supabase
+      .from("tasks")
+      .update({ archived: false, completed_at: null })
+      .eq("id", task.id);
+    if (error) {
+      console.error(error);
+      showToast("⚠ Restore failed: " + error.message, "warn");
+      return;
+    }
+    setTasks((arr) => arr.filter((t) => t.id !== task.id));
+    showToast("✓ Task restored to Board");
+  }
 
   const filtered = tasks.filter((t) => {
     if (filterCat !== "All" && t.category !== filterCat) return false;
@@ -47,6 +111,27 @@ export default function Archive() {
 
   return (
     <div>
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            zIndex: 9999,
+            background:
+              toast.type === "warn" ? "var(--danger)" : "var(--text-primary)",
+            color: "white",
+            padding: "10px 16px",
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 500,
+            maxWidth: 360,
+          }}
+        >
+          {toast.msg}
+        </div>
+      )}
+
       <div className="page-header">
         <div>
           <h1 className="page-title">Archive</h1>
@@ -72,20 +157,19 @@ export default function Archive() {
       </div>
 
       <div className="filter-bar">
-        {[
-          "All",
-          "Engineering",
-          "Design",
-          "Finance",
-          "Marketing",
-          "Operations",
-        ].map((c) => (
+        <button
+          className={`filter-pill${filterCat === "All" ? " active" : ""}`}
+          onClick={() => setFilterCat("All")}
+        >
+          All
+        </button>
+        {categories.map((c) => (
           <button
-            key={c}
-            className={`filter-pill${filterCat === c ? " active" : ""}`}
-            onClick={() => setFilterCat(c)}
+            key={c.id}
+            className={`filter-pill${filterCat === c.name ? " active" : ""}`}
+            onClick={() => setFilterCat(c.name)}
           >
-            {c}
+            {c.icon} {c.name}
           </button>
         ))}
       </div>
@@ -108,6 +192,7 @@ export default function Archive() {
                 <th>Completed</th>
                 <th>Priority</th>
                 <th>Files</th>
+                <th style={{ textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -118,7 +203,7 @@ export default function Archive() {
                     <span
                       className={`badge badge-${t.category?.toLowerCase()}`}
                     >
-                      {t.category}
+                      {t.category || "—"}
                     </span>
                   </td>
                   <td style={{ fontSize: 12 }}>
@@ -149,10 +234,48 @@ export default function Archive() {
                       </a>
                     ) : (
                       <span
-                        style={{ color: "var(--text-tertiary)", fontSize: 12 }}
+                        style={{
+                          color: "var(--text-tertiary)",
+                          fontSize: 12,
+                        }}
                       >
                         —
                       </span>
+                    )}
+                  </td>
+                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                    <button
+                      onClick={() => restoreTask(t)}
+                      title="Restore — send back to the Board"
+                      style={{
+                        background: "none",
+                        border: "1px solid var(--border)",
+                        borderRadius: 5,
+                        padding: "3px 8px",
+                        cursor: "pointer",
+                        fontSize: 11,
+                        color: "var(--text-secondary)",
+                        marginRight: 4,
+                      }}
+                    >
+                      ↩ Restore
+                    </button>
+                    {canDeleteTask(t) && (
+                      <button
+                        onClick={() => deleteTask(t)}
+                        title="Permanently delete — admins and creator only"
+                        style={{
+                          background: "none",
+                          border: "1px solid var(--danger)",
+                          borderRadius: 5,
+                          padding: "3px 8px",
+                          cursor: "pointer",
+                          fontSize: 11,
+                          color: "var(--danger)",
+                        }}
+                      >
+                        🗑
+                      </button>
                     )}
                   </td>
                 </tr>
